@@ -2339,8 +2339,15 @@
                 // 监听鼠标在 Canvas 的位置 (确定摆放预览格)
                 this.canvas.addEventListener('mousemove', (e) => {
                     const rect = this.canvas.getBoundingClientRect();
-                    this.mouseX = e.clientX - rect.left;
-                    this.mouseY = e.clientY - rect.top;
+                    const rawX = e.clientX - rect.left;
+                    const rawY = e.clientY - rect.top;
+
+                    // 计算缩放比例以映射到 1000x600 的 Canvas 空间
+                    const scaleX = this.canvas.width / rect.width;
+                    const scaleY = this.canvas.height / rect.height;
+
+                    this.mouseX = rawX * scaleX;
+                    this.mouseY = rawY * scaleY;
 
                     // 判断是否在格子里 (列 x:100~910, 行 y:100~600)
                     if (this.mouseX >= 100 && this.mouseX < 910 && this.mouseY >= 100 && this.mouseY < 600) {
@@ -2360,15 +2367,20 @@
                     this.hoverRow = -1;
                 });
 
-                // 点击草坪：种植、除草、收集阳光
+                // 点击草坪：种植、除草、收集阳光 (采用独立且带自适应缩放的坐标转换，确保两次点击绝对生效)
                 this.canvas.addEventListener('click', (e) => {
                     if (this.gameState !== 'playing') return;
 
                     const rect = this.canvas.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    const clickY = e.clientY - rect.top;
+                    const rawClickX = e.clientX - rect.left;
+                    const rawClickY = e.clientY - rect.top;
 
-                    // 1. 先探测是否点中阳光 (点中判定半径设为 35px 保证手感)
+                    const scaleX = this.canvas.width / rect.width;
+                    const scaleY = this.canvas.height / rect.height;
+                    const clickX = rawClickX * scaleX;
+                    const clickY = rawClickY * scaleY;
+
+                    // 1. 先探测是否点中阳光 (点中判定半径设为 38px 保证手感)
                     for (let i = this.suns.length - 1; i >= 0; i--) {
                         const sun = this.suns[i];
                         if (sun.state !== 'collecting') {
@@ -2380,9 +2392,16 @@
                         }
                     }
 
-                    // 2. 网格操作
-                    if (this.isHoveringGrid && this.hoverCol !== -1 && this.hoverRow !== -1) {
-                        const existingPlant = this.plantsGrid[this.hoverRow][this.hoverCol];
+                    // 2. 网格坐标计算 (独立计算，不依赖于先前的 mousemove 事件)
+                    let clickCol = -1;
+                    let clickRow = -1;
+                    if (clickX >= 100 && clickX < 910 && clickY >= 100 && clickY < 600) {
+                        clickCol = Math.floor((clickX - 100) / 90);
+                        clickRow = Math.floor((clickY - 100) / 100);
+                    }
+
+                    if (clickCol !== -1 && clickRow !== -1) {
+                        const existingPlant = this.plantsGrid[clickRow][clickCol];
 
                         if (this.isShovelSelected) {
                             // 铲除现有植物
@@ -2392,7 +2411,7 @@
                                 for(let i=0; i<6; i++) {
                                     this.spawnParticle(existingPlant.x, existingPlant.y, (Math.random()-0.5)*4, (Math.random()-0.5)*4, '#4caf50', 3+Math.random()*3, 20);
                                 }
-                                this.plantsGrid[this.hoverRow][this.hoverCol] = null;
+                                this.plantsGrid[clickRow][clickCol] = null;
                                 this.isShovelSelected = false;
                                 this.updateUI();
                             }
@@ -2408,8 +2427,8 @@
                                 if (elapsed >= meta.cooldown) {
                                     // 扣费、种植、进入冷却
                                     this.sun -= meta.cost;
-                                    const newPlant = new Plant(this.selectedPlant, this.hoverCol, this.hoverRow);
-                                    this.plantsGrid[this.hoverRow][this.hoverCol] = newPlant;
+                                    const newPlant = new Plant(this.selectedPlant, clickCol, clickRow);
+                                    this.plantsGrid[clickRow][clickCol] = newPlant;
                                     this.cooldowns[this.selectedPlant].lastPlaced = now;
 
                                     sound.playPlant();
