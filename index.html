@@ -285,6 +285,8 @@
             position: relative;
             overflow: hidden;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            -webkit-user-drag: none;
         }
 
         .card:hover:not(.disabled) {
@@ -355,6 +357,8 @@
             margin-left: 15px;
             transition: all 0.2s ease;
             position: relative;
+            user-select: none;
+            -webkit-user-drag: none;
         }
 
         #shovel-btn:hover {
@@ -559,7 +563,7 @@
                     <!-- 卡片由 JS 动态生成，维护图标的统一性 -->
                 </div>
 
-                <div id="shovel-btn" title="铲除植物">
+                <div id="shovel-btn" title="铲除植物" draggable="false">
                     <svg viewBox="0 0 24 24">
                         <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z" />
                     </svg>
@@ -2131,12 +2135,15 @@
                     const card = document.createElement('div');
                     card.className = `card ${this.sun < meta.cost ? 'disabled' : ''}`;
                     card.dataset.type = type;
+                    card.setAttribute('draggable', 'false');
+                    card.addEventListener('dragstart', (e) => e.preventDefault());
                     
                     // 内嵌卡片绘制小画布
                     const canvas = document.createElement('canvas');
                     canvas.className = 'card-preview';
                     canvas.width = 60;
                     canvas.height = 60;
+                    canvas.setAttribute('draggable', 'false');
                     const ctx = canvas.getContext('2d');
                     
                     // 居中渲染预览图
@@ -2164,12 +2171,20 @@
                         if (this.gameState !== 'playing') return;
                         if (card.classList.contains('disabled')) return;
                         sound.playSelect();
-                        this.selectedPlant = type;
-                        this.isShovelSelected = false; // 取消铲子
                         
-                        // 高亮当前选中的植物卡片
-                        document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
-                        card.classList.add('selected');
+                        if (this.selectedPlant === type) {
+                            // 如果再次点击已选中的卡片，则取消选择
+                            this.selectedPlant = null;
+                            card.classList.remove('selected');
+                        } else {
+                            this.selectedPlant = type;
+                            this.isShovelSelected = false; // 取消铲子
+                            
+                            // 高亮当前选中的植物卡片
+                            document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+                            card.classList.add('selected');
+                        }
+                        this.updateUI();
                     });
 
                     container.appendChild(card);
@@ -2292,6 +2307,33 @@
                     this.selectedPlant = null; // 清理植物卡片选择
                     document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
                     this.updateUI();
+                });
+
+                // 阻止铲子按钮的默认拖拽
+                document.getElementById('shovel-btn').addEventListener('dragstart', (e) => e.preventDefault());
+
+                // 右键取消选择植物或铲子
+                this.canvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    if (this.gameState !== 'playing') return;
+                    if (this.selectedPlant || this.isShovelSelected) {
+                        this.selectedPlant = null;
+                        this.isShovelSelected = false;
+                        document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+                        this.updateUI();
+                    }
+                });
+
+                // 按 Escape 取消选择
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        if (this.gameState === 'playing' && (this.selectedPlant || this.isShovelSelected)) {
+                            this.selectedPlant = null;
+                            this.isShovelSelected = false;
+                            document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+                            this.updateUI();
+                        }
+                    }
                 });
 
                 // 监听鼠标在 Canvas 的位置 (确定摆放预览格)
@@ -2703,6 +2745,9 @@
                 // 8. 漂浮阳光
                 this.suns.forEach(s => s.draw(this.ctx));
 
+                // 9. 鼠标跟随的浮动植物/铲子 (当不在草坪网格内时，在鼠标位置绘制半透明悬浮物)
+                this.drawFloatingSelection();
+
                 this.ctx.restore();
             }
 
@@ -2744,6 +2789,61 @@
                 // 金色草坪隔离边界
                 this.ctx.fillStyle = '#facc15';
                 this.ctx.fillRect(98, 100, 4, 500);
+            }
+
+            drawFloatingSelection() {
+                if (this.selectedPlant) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.6; // 60% 透明度
+                    
+                    // 仅在不在网格内（例如在 HUD、割草机区域、草坪外侧泥地）时画在鼠标位置
+                    if (!this.isHoveringGrid) {
+                        const mx = this.mouseX;
+                        const my = this.mouseY;
+                        if (this.selectedPlant === 'sunflower') DrawUtils.drawSunflowerCard(this.ctx, mx, my, 80, 0);
+                        else if (this.selectedPlant === 'peashooter') DrawUtils.drawPeashooterCard(this.ctx, mx, my, 80, 0, false);
+                        else if (this.selectedPlant === 'snowpea') DrawUtils.drawPeashooterCard(this.ctx, mx, my, 80, 0, true);
+                        else if (this.selectedPlant === 'wallnut') DrawUtils.drawWallNutCard(this.ctx, mx, my, 80, 1);
+                        else if (this.selectedPlant === 'cherrybomb') DrawUtils.drawCherryBombCard(this.ctx, mx, my, 80, 0, 0);
+                    }
+                    this.ctx.restore();
+                } else if (this.isShovelSelected) {
+                    // 如果选中了铲子且不在网格内，绘制随鼠移动的铁铲图标
+                    if (!this.isHoveringGrid) {
+                        this.ctx.save();
+                        this.ctx.translate(this.mouseX + 10, this.mouseY - 10); // 稍微偏置避开鼠标指针
+                        
+                        // 铲面 (银灰)
+                        this.ctx.fillStyle = '#cbd5e1';
+                        this.ctx.strokeStyle = '#64748b';
+                        this.ctx.lineWidth = 2;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(-6, -6);
+                        this.ctx.lineTo(6, -6);
+                        this.ctx.lineTo(8, 6);
+                        this.ctx.lineTo(-8, 6);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                        this.ctx.stroke();
+
+                        // 铲把 (木褐色)
+                        this.ctx.strokeStyle = '#a1887f';
+                        this.ctx.lineWidth = 4.5;
+                        this.ctx.lineCap = 'round';
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(0, -6);
+                        this.ctx.lineTo(-12, -22);
+                        this.ctx.stroke();
+
+                        // 握手柄 (金属圈)
+                        this.ctx.fillStyle = '#64748b';
+                        this.ctx.beginPath();
+                        this.ctx.arc(-12, -22, 4, 0, Math.PI*2);
+                        this.ctx.fill();
+                        
+                        this.ctx.restore();
+                    }
+                }
             }
 
             drawGridPreview() {
